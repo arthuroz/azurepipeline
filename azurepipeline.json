@@ -1,0 +1,803 @@
+{
+	"info": {
+		"name": "Azure pipeline - repo, branches, build and release",
+		"description": "This is a sample \"pipeline as code\" for Azure DevOps\n\nIt covers\n1. Creates a repo\n2. Initialises master branch\n3. Makes sure nobody can push to master branch directly and pull requests must be reviewed before merge \n4. Makes sure comments are resolved before merge into master branch\n5. Creates dev branch\n6. Creates build pipeline, which runs maven build then publishes a docker image to Azure Container Registry\n7. Creates release pipeline that deploys to dev, test and staging environments\n8. This Postman collection also includes a few delete requests that can clean up test repo and pipelines to help tailor the sample pipeline to your own needs",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Configure variables in \"Pre-request Script\" and then create a new repo",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.globals.set(\"repo_id\", pm.response.json().id);",
+							"pm.globals.set(\"project_id\", pm.response.json().project.id);"
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"//Configurations:",
+							"",
+							"//basic auth: \"username:pattoken\"",
+							"pm.globals.set(\"username\", \"\");",
+							"pm.globals.set(\"password\", \"\");",
+							"",
+							"//Azure organization name",
+							"pm.globals.set(\"collection\", \"\");",
+							"//Azure project name",
+							"pm.globals.set(\"project\", \"\");",
+							"//Service under development, will also be used as repository name",
+							"pm.globals.set(\"service_name\", \"\");",
+							"//Docker image name",
+							"pm.globals.set(\"docker_image_name\", \"\");",
+							"//Azure Container registry name",
+							"pm.globals.set(\"docker_registry\", \"\");",
+							"//Azure Resource Group for Docker",
+							"pm.globals.set(\"docker_resource_group\", \"\");",
+							"//Release pipeline approver group",
+							"pm.globals.set(\"approvers_group_id\", \"\");",
+							"",
+							"//Composes docker name space and docker repository from provided variables",
+							"pm.globals.set(\"docker_name_space\", \"{{docker_registry}}.azurecr.io\");",
+							"pm.globals.set(\"docker_repository\", \"{{collection}}/{{docker_image_name}}\");",
+							"//Azure Docker subscription Id",
+							"pm.globals.set(\"docker_subscription\", \"\");",
+							"//Azure Docker service connection Id",
+							"pm.globals.set(\"azure_service_connection_id\", \"\");",
+							"",
+							"//Build pipeline",
+							"pm.globals.set(\"build_variables\", '{\"SPRING_PROFILES_ACTIVE\": {\"value\": \"build\"}}');",
+							"",
+							"//Release pipeline variables, including name of Azure App Service, Azure Resource Group, Application Settings and Linked variable group",
+							"//dev",
+							"pm.globals.set(\"web_app_name_dev\", \"dev-{{service_name}}-wba\");",
+							"pm.globals.set(\"rss_group_name_dev\", \"dev-{{service_name}}-rgr\");",
+							"pm.globals.set(\"app_settings_dev\", \"-SPRING_PROFILES_ACTIVE \\\\\\\"dev\\\\\\\" -WEBSITE_TIME_ZONE \\\\\\\"AUS Eastern Standard Time\\\\\\\"\");",
+							"pm.globals.set(\"linked_variable_groups_dev\", \"[]\");",
+							"",
+							"//test",
+							"pm.globals.set(\"web_app_name_test\", \"test-{{service_name}}-wba\");",
+							"pm.globals.set(\"rss_group_name_test\", \"test-{{service_name}}-rgr\");",
+							"pm.globals.set(\"app_settings_test\", \"-SPRING_PROFILES_ACTIVE \\\\\\\"test\\\\\\\" -WEBSITE_TIME_ZONE \\\\\\\"AUS Eastern Standard Time\\\\\\\"\");",
+							"pm.globals.set(\"linked_variable_groups_test\", \"[]\");",
+							"",
+							"//staging",
+							"pm.globals.set(\"web_app_name_stg\", \"stg-{{service_name}}-wba\");",
+							"pm.globals.set(\"rss_group_name_stg\", \"stg-{{service_name}}-rgr\");",
+							"pm.globals.set(\"app_settings_stg\", \"-SPRING_PROFILES_ACTIVE \\\\\\\"staging\\\\\\\" -WEBSITE_TIME_ZONE \\\\\\\"AUS Eastern Standard Time\\\\\\\"\");",
+							"pm.globals.set(\"linked_variable_groups_stg\", \"[]\");"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"name\": \"{{service_name}}\",\n  \"defaultBranch\": \"refs/heads/master\"\n}"
+				},
+				"url": {
+					"raw": "https://dev.azure.com/{{collection}}/{{project}}/_apis/git/repositories?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"azure",
+						"com"
+					],
+					"path": [
+						"{{collection}}",
+						"{{project}}",
+						"_apis",
+						"git",
+						"repositories"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Init master branch",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.globals.set(\"master_branch\", pm.response.json().refUpdates[0].newObjectId);",
+							"pm.globals.set(\"author_id\", pm.response.json().pushedBy.id);"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"refUpdates\": [\n    {\n      \"name\": \"refs/heads/master\",\n      \"oldObjectId\": \"0000000000000000000000000000000000000000\"\n    }\n  ],\n  \"commits\": [\n    {\n      \"comment\": \"Initial commit.\",\n      \"changes\": [\n        {\n          \"changeType\": \"add\",\n          \"item\": {\n            \"path\": \"/README.md\"\n          },\n          \"newContent\": {\n            \"content\": \"# Introduction to {{service_name}}\",\n            \"contentType\": \"rawtext\"\n          }\n        }\n      ]\n    }\n  ]\n}"
+				},
+				"url": {
+					"raw": "https://dev.azure.com/{{collection}}/{{project}}/_apis/git/repositories/{{repo_id}}/pushes?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"azure",
+						"com"
+					],
+					"path": [
+						"{{collection}}",
+						"{{project}}",
+						"_apis",
+						"git",
+						"repositories",
+						"{{repo_id}}",
+						"pushes"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Master branch - direct push not allowed; minimum 1 reviewer for pull requests",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"type\": {\n    \"id\": \"fa4e907d-c16b-4a4c-9dfa-4906e5d171dd\"\n  },\n  \"isBlocking\": true,\n  \"isEnabled\": true,\n  \"settings\": {\n    \"minimumApproverCount\": 1,\n    \"creatorVoteCounts\": false,\n    \"allowDownvotes\": false,\n    \"resetOnSourcePush\": false,\n    \"scope\": [\n      {\n        \"refName\": \"refs/heads/master\",\n        \"matchKind\": \"Exact\",\n        \"repositoryId\": \"{{repo_id}}\"\n      }\n    ]\n  }\n}"
+				},
+				"url": {
+					"raw": "https://{{collection}}.visualstudio.com/{{project_id}}/_apis/policy/Configurations?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"{{collection}}",
+						"visualstudio",
+						"com"
+					],
+					"path": [
+						"{{project_id}}",
+						"_apis",
+						"policy",
+						"Configurations"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Master branch - comment must be resolved",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"isBlocking\": true,\n  \"isEnabled\": true,\n  \"settings\": {\n    \"scope\": [\n      {\n        \"matchKind\": \"Exact\",\n        \"refName\": \"refs/heads/master\",\n        \"repositoryId\": \"{{repo_id}}\"\n      }\n    ]\n  },\n  \"type\": {\n    \"id\": \"c6a1889d-b943-4856-b76f-9e46bb6b0df2\"\n  }\n}"
+				},
+				"url": {
+					"raw": "https://{{collection}}.visualstudio.com/{{project_id}}/_apis/policy/Configurations?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"{{collection}}",
+						"visualstudio",
+						"com"
+					],
+					"path": [
+						"{{project_id}}",
+						"_apis",
+						"policy",
+						"Configurations"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Init dev branch",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "[\n  {\n    \"name\": \"refs/heads/dev\",\n    \"newObjectId\": \"{{master_branch}}\",\n    \"oldObjectId\": \"0000000000000000000000000000000000000000\"\n  }\n]"
+				},
+				"url": {
+					"raw": "https://dev.azure.com/{{collection}}/{{project}}/_apis/git/repositories/{{repo_id}}/refs?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"azure",
+						"com"
+					],
+					"path": [
+						"{{collection}}",
+						"{{project}}",
+						"_apis",
+						"git",
+						"repositories",
+						"{{repo_id}}",
+						"refs"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create build pipeline",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.globals.set(\"build_pipeline_id\", pm.response.json().id);"
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"triggers\": [\n    {\n      \"branchFilters\": [\n        \"+refs/heads/master\"\n      ],\n      \"maxConcurrentBuildsPerBranch\": 1,\n      \"pollingInterval\": 0,\n      \"triggerType\": 2\n    }\n  ],\n  \"variables\": {{build_variables}},\n  \"retentionRules\": [\n    {\n      \"branches\": [\n        \"+refs/heads/*\"\n      ],\n      \"daysToKeep\": 10,\n      \"minimumToKeep\": 1,\n      \"deleteBuildRecord\": true,\n      \"deleteTestResults\": true\n    }\n  ],\n  \"buildNumberFormat\": \"$(date:yyyyMMdd)$(rev:.r)\",\n  \"jobAuthorizationScope\": 1,\n  \"jobTimeoutInMinutes\": 60,\n  \"jobCancelTimeoutInMinutes\": 5,\n  \"process\": {\n    \"phases\": [\n      {\n        \"steps\": [\n          {\n            \"enabled\": true,\n            \"continueOnError\": false,\n            \"displayName\": \"Package & SpotBugs\",\n            \"condition\": \"succeeded()\",\n            \"task\": {\n              \"id\": \"ac4ee482-65da-4485-a532-7b085873e532\",\n              \"versionSpec\": \"3.*\",\n              \"definitionType\": \"task\"\n            },\n            \"inputs\": {\n              \"mavenPOMFile\": \"$(Parameters.mavenPOMFile)\",\n              \"goals\": \"package spotbugs:spotbugs\",\n              \"options\": \"-Dhttp.keepAlive=false\",\n              \"publishJUnitResults\": \"true\",\n              \"testResultsFiles\": \"target/surefire-reports/TEST-*.xml\",\n              \"codeCoverageTool\": \"Cobertura\",\n              \"failIfCoverageEmpty\": \"false\",\n              \"javaHomeSelection\": \"JDKVersion\",\n              \"jdkVersion\": \"default\",\n              \"jdkArchitecture\": \"x64\",\n              \"mavenVersionSelection\": \"Default\",\n              \"mavenSetM2Home\": \"false\",\n              \"mavenOpts\": \"-Xmx3072m\",\n              \"mavenFeedAuthenticate\": \"true\",\n              \"skipEffectivePom\": \"false\",\n              \"sqAnalysisEnabled\": \"false\",\n              \"sqMavenPluginVersionChoice\": \"latest\",\n              \"checkstyleAnalysisEnabled\": \"false\",\n              \"pmdAnalysisEnabled\": \"false\",\n              \"findbugsAnalysisEnabled\": \"false\"\n            }\n          },\n          {\n            \"enabled\": true,\n            \"continueOnError\": false,\n            \"displayName\": \"Build an image\",\n            \"condition\": \"succeeded()\",\n            \"task\": {\n              \"id\": \"e28912f1-0114-4464-802a-a3a35437fd16\",\n              \"versionSpec\": \"0.*\",\n              \"definitionType\": \"task\"\n            },\n            \"inputs\": {\n              \"containerregistrytype\": \"Azure Container Registry\",\n              \"dockerRegistryEndpoint\": \"\",\n              \"azureSubscriptionEndpoint\": \"{{azure_service_connection_id}}\",\n              \"azureContainerRegistry\": \"{\\\"loginServer\\\":\\\"{{docker_name_space}}\\\", \\\"id\\\" : \\\"/subscriptions/{{docker_subscription}}/resourceGroups/{{docker_resource_group}}/providers/Microsoft.ContainerRegistry/registries/{{docker_registry}}\\\"}\",\n              \"action\": \"Build an image\",\n              \"dockerFile\": \"**/Dockerfile\",\n              \"defaultContext\": \"true\",\n              \"imageName\": \"{{docker_name_space}}/{{docker_repository}}:$(Build.BuildNumber)\",\n              \"qualifyImageName\": \"true\",\n              \"includeSourceTags\": \"false\",\n              \"includeLatestTag\": \"false\",\n              \"detached\": \"true\",\n              \"restartPolicy\": \"no\",\n              \"enforceDockerNamingConvention\": \"true\",\n              \"cwd\": \"$(System.DefaultWorkingDirectory)\"\n            }\n          },\n          {\n            \"enabled\": true,\n            \"continueOnError\": false,\n            \"displayName\": \"Push an image\",\n            \"condition\": \"succeeded()\",\n            \"task\": {\n              \"id\": \"e28912f1-0114-4464-802a-a3a35437fd16\",\n              \"versionSpec\": \"0.*\",\n              \"definitionType\": \"task\"\n            },\n            \"inputs\": {\n              \"containerregistrytype\": \"Azure Container Registry\",\n              \"dockerRegistryEndpoint\": \"\",\n              \"azureSubscriptionEndpoint\": \"{{azure_service_connection_id}}\",\n              \"azureContainerRegistry\": \"{\\\"loginServer\\\":\\\"{{docker_name_space}}\\\", \\\"id\\\" : \\\"/subscriptions/{{docker_subscription}}/resourceGroups/{{docker_resource_group}}/providers/Microsoft.ContainerRegistry/registries/{{docker_registry}}\\\"}\",\n              \"action\": \"Push an image\",\n              \"dockerFile\": \"**/Dockerfile\",\n              \"defaultContext\": \"true\",\n              \"imageName\": \"{{docker_name_space}}/{{docker_repository}}:$(Build.BuildNumber)\",\n              \"qualifyImageName\": \"true\",\n              \"detached\": \"true\",\n              \"restartPolicy\": \"no\",\n              \"enforceDockerNamingConvention\": \"true\",\n              \"cwd\": \"$(System.DefaultWorkingDirectory)\"\n            }\n          }\n        ],\n        \"name\": \"Build\",\n        \"refName\": \"Phase_1\",\n        \"condition\": \"succeeded()\",\n        \"target\": {\n          \"executionOptions\": {\n            \"type\": 0\n          },\n          \"allowScriptsAuthAccessOption\": false,\n          \"type\": 1\n        },\n        \"jobAuthorizationScope\": 1,\n        \"jobCancelTimeoutInMinutes\": 1\n      }\n    ],\n    \"type\": 1\n  },\n  \"repository\": {\n    \"properties\": {\n      \"labelSources\": \"6\",\n      \"labelSourcesFormat\": \"$(build.buildNumber)\",\n      \"reportBuildStatus\": \"true\",\n      \"fetchDepth\": \"0\",\n      \"cleanOptions\": \"3\",\n      \"gitLfsSupport\": \"false\",\n      \"skipSyncSource\": \"false\",\n      \"checkoutNestedSubmodules\": \"false\"\n    },\n    \"id\": \"{{repo_id}}\",\n    \"type\": \"TfsGit\",\n    \"name\": \"{{service_name}}\",\n    \"defaultBranch\": \"refs/heads/master\",\n    \"clean\": \"true\",\n    \"checkoutSubmodules\": false\n  },\n  \"processParameters\": {\n    \"inputs\": [\n      {\n        \"name\": \"mavenPOMFile\",\n        \"label\": \"Maven POM file\",\n        \"defaultValue\": \"pom.xml\",\n        \"required\": true,\n        \"type\": \"filePath\",\n        \"helpMarkDown\": \"\"\n      }\n    ]\n  },\n  \"queue\": {\n    \"id\": 155,\n    \"name\": \"Hosted Ubuntu 1604\",\n    \"pool\": {\n      \"id\": 6,\n      \"name\": \"Hosted Ubuntu 1604\",\n      \"isHosted\": true\n    }\n  },\n  \"name\": \"{{service_name}}-master\",\n  \"path\": \"\\\\master\\\\\",\n  \"type\": 2,\n  \"project\": {\n    \"id\": \"{{project_id}}\"\n  }\n}"
+				},
+				"url": {
+					"raw": "https://dev.azure.com/{{collection}}/{{project}}/_apis/build/definitions?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"azure",
+						"com"
+					],
+					"path": [
+						"{{collection}}",
+						"{{project}}",
+						"_apis",
+						"build",
+						"definitions"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "Create development release pipeline",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							"pm.globals.set(\"release_pipeline_id\", pm.response.json().id);"
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n  \"environments\": [\n    {\n      \"name\": \"dev\",\n      \"rank\": 1,\n      \"owner\": {\n        \"id\": \"{{author_id}}\"\n      },\n      \"variableGroups\": {{linked_variable_groups_dev}},\n      \"preDeployApprovals\": {\n        \"approvals\": [\n          {\n            \"rank\": 1,\n            \"isAutomated\": true\n          }\n        ],\n        \"approvalOptions\": {\n          \"executionOrder\": 1\n        }\n      },\n      \"postDeployApprovals\": {\n        \"approvals\": [\n          {\n            \"rank\": 1,\n            \"isAutomated\": true\n          }\n        ],\n        \"approvalOptions\": {\n          \"executionOrder\": 2\n        }\n      },\n      \"deployPhases\": [\n        {\n          \"deploymentInput\": {\n            \"skipArtifactsDownload\": false,\n            \"queueId\": 155,\n            \"jobCancelTimeoutInMinutes\": 1,\n            \"condition\": \"succeeded()\"\n          },\n          \"rank\": 1,\n          \"phaseType\": 1,\n          \"name\": \"Agent phase\",\n          \"workflowTasks\": [\n            {\n              \"taskId\": \"497d490f-eea7-4f2b-ab94-48d9c1acdcb1\",\n              \"version\": \"4.*\",\n              \"name\": \"Deploy Azure App Service Environment\",\n              \"enabled\": true,\n              \"definitionType\": \"task\",\n              \"condition\": \"succeeded()\",\n              \"inputs\": {\n                \"ConnectionType\": \"AzureRM\",\n                \"ConnectedServiceName\": \"{{azure_service_connection_id}}\",\n                \"PublishProfilePath\": \"$(System.DefaultWorkingDirectory)/**/*.pubxml\",\n                \"PublishProfilePassword\": \"\",\n                \"WebAppKind\": \"webAppContainer\",\n                \"WebAppName\": \"{{web_app_name_dev}}\",\n                \"DeployToSlotOrASEFlag\": \"false\",\n                \"ResourceGroupName\": \"{{rss_group_name_dev}}\",\n                \"DockerNamespace\": \"{{docker_name_space}}\",\n                \"DockerRepository\": \"{{docker_repository}}\",\n                \"DockerImageTag\": \"$(BUILD.BUILDID)\",\n                \"Package\": \"$(System.DefaultWorkingDirectory)/**/*.zip\",\n                \"AppSettings\": \"{{app_settings_dev}}\",\n                \"UseWebDeploy\": \"false\",\n                \"DeploymentType\": \"webDeploy\"\n              }\n            }\n          ]\n        }\n      ],\n      \"conditions\": [\n        {\n          \"name\": \"ReleaseStarted\",\n          \"conditionType\": 1,\n          \"value\": \"\"\n        }\n      ],\n      \"retentionPolicy\": {\n        \"daysToKeep\": 30,\n        \"releasesToKeep\": 3,\n        \"retainBuild\": true\n      },\n      \"executionPolicy\": {\n        \"concurrencyCount\": 1,\n        \"queueDepthCount\": 0\n      }\n    },\n    {\n      \"name\": \"test\",\n      \"rank\": 2,\n      \"owner\": {\n        \"id\": \"{{author_id}}\"\n      },\n      \"variableGroups\": {{linked_variable_groups_test}},\n      \"preDeployApprovals\": {\n        \"approvals\": [\n          {\n            \"rank\": 1,\n            \"isAutomated\": false,\n            \"approver\": {\n              \"id\": \"{{approvers_group_id}}\",\n              \"isContainer\": true\n            }\n          }\n        ],\n        \"approvalOptions\": {\n          \"requiredApproverCount\": 1,\n          \"releaseCreatorCanBeApprover\": true,\n          \"executionOrder\": 1\n        }\n      },\n      \"postDeployApprovals\": {\n        \"approvals\": [\n          {\n            \"rank\": 1,\n            \"isAutomated\": true\n          }\n        ],\n        \"approvalOptions\": {\n          \"executionOrder\": 2\n        }\n      },\n      \"deployPhases\": [\n        {\n          \"deploymentInput\": {\n            \"skipArtifactsDownload\": false,\n            \"queueId\": 155,\n            \"jobCancelTimeoutInMinutes\": 1,\n            \"condition\": \"succeeded()\"\n          },\n          \"rank\": 1,\n          \"phaseType\": 1,\n          \"name\": \"Agent phase\",\n          \"workflowTasks\": [\n            {\n              \"taskId\": \"497d490f-eea7-4f2b-ab94-48d9c1acdcb1\",\n              \"version\": \"4.*\",\n              \"name\": \"Deploy Azure App Service Environment\",\n              \"enabled\": true,\n              \"definitionType\": \"task\",\n              \"condition\": \"succeeded()\",\n              \"inputs\": {\n                \"ConnectionType\": \"AzureRM\",\n                \"ConnectedServiceName\": \"{{azure_service_connection_id}}\",\n                \"PublishProfilePath\": \"$(System.DefaultWorkingDirectory)/**/*.pubxml\",\n                \"PublishProfilePassword\": \"\",\n                \"WebAppKind\": \"webAppContainer\",\n                \"WebAppName\": \"{{web_app_name_test}}\",\n                \"DeployToSlotOrASEFlag\": \"false\",\n                \"ResourceGroupName\": \"{{rss_group_name_test}}\",\n                \"DockerNamespace\": \"{{docker_name_space}}\",\n                \"DockerRepository\": \"{{docker_repository}}\",\n                \"DockerImageTag\": \"$(BUILD.BUILDID)\",\n                \"Package\": \"$(System.DefaultWorkingDirectory)/**/*.zip\",\n                \"AppSettings\": \"{{app_settings_test}}\",\n                \"UseWebDeploy\": \"false\",\n                \"DeploymentType\": \"webDeploy\"\n              }\n            }\n          ]\n        }\n      ],\n      \"conditions\": [\n        {\n          \"name\": \"dev\",\n          \"conditionType\": 2,\n          \"value\": \"4\"\n        }\n      ],\n      \"executionPolicy\": {\n        \"concurrencyCount\": 1,\n        \"queueDepthCount\": 1\n      },\n      \"retentionPolicy\": {\n        \"daysToKeep\": 30,\n        \"releasesToKeep\": 3,\n        \"retainBuild\": true\n      }\n    },\n    {\n      \"name\": \"staging\",\n      \"rank\": 3,\n      \"owner\": {\n        \"id\": \"{{author_id}}\"\n      },\n      \"variableGroups\": {{linked_variable_groups_stg}},\n      \"preDeployApprovals\": {\n        \"approvals\": [\n          {\n            \"rank\": 1,\n            \"isAutomated\": false,\n            \"approver\": {\n              \"id\": \"{{approvers_group_id}}\",\n              \"isContainer\": true\n            }\n          }\n        ],\n        \"approvalOptions\": {\n          \"executionOrder\": 1\n        }\n      },\n      \"postDeployApprovals\": {\n        \"approvals\": [\n          {\n            \"rank\": 1,\n            \"isAutomated\": true\n          }\n        ],\n        \"approvalOptions\": {\n          \"executionOrder\": 2\n        }\n      },\n      \"deployPhases\": [\n        {\n          \"deploymentInput\": {\n            \"queueId\": 155,\n            \"jobCancelTimeoutInMinutes\": 1,\n            \"condition\": \"succeeded()\"\n          },\n          \"rank\": 1,\n          \"phaseType\": 1,\n          \"name\": \"Agent phase\",\n          \"refName\": null,\n          \"workflowTasks\": [\n          \t{\n              \"taskId\": \"497d490f-eea7-4f2b-ab94-48d9c1acdcb1\",\n              \"version\": \"4.*\",\n              \"name\": \"Deploy Azure App Service Environment\",\n              \"enabled\": true,\n              \"definitionType\": \"task\",\n              \"condition\": \"succeeded()\",\n              \"inputs\": {\n                \"ConnectionType\": \"AzureRM\",\n                \"ConnectedServiceName\": \"{{azure_service_connection_id}}\",\n                \"PublishProfilePath\": \"$(System.DefaultWorkingDirectory)/**/*.pubxml\",\n                \"PublishProfilePassword\": \"\",\n                \"WebAppKind\": \"webAppContainer\",\n                \"WebAppName\": \"{{web_app_name_stg}}\",\n                \"DeployToSlotOrASEFlag\": \"false\",\n                \"ResourceGroupName\": \"{{rss_group_name_stg}}\",\n                \"DockerNamespace\": \"{{docker_name_space}}\",\n                \"DockerRepository\": \"{{docker_repository}}\",\n                \"DockerImageTag\": \"$(BUILD.BUILDID)\",\n                \"Package\": \"$(System.DefaultWorkingDirectory)/**/*.zip\",\n                \"AppSettings\": \"{{app_settings_stg}}\",\n                \"UseWebDeploy\": \"false\",\n                \"DeploymentType\": \"webDeploy\"\n              }\n            }\n          ]\n        }\n      ],\n      \"conditions\": [\n        {\n          \"name\": \"test\",\n          \"conditionType\": 2,\n          \"value\": \"4\"\n        }\n      ],\n      \"executionPolicy\": {\n        \"concurrencyCount\": 1,\n        \"queueDepthCount\": 1\n      },\n      \"retentionPolicy\": {\n        \"daysToKeep\": 30,\n        \"releasesToKeep\": 3,\n        \"retainBuild\": true\n      }\n    }\n  ],\n  \"artifacts\": [\n    {\n      \"sourceId\": \"{{azure_service_connection_id}}:{{docker_name_space}}:{{docker_repository}}\",\n      \"type\": \"AzureContainerRepository\",\n      \"alias\": \"_{{collection}}_{{service_name}}\",\n      \"definitionReference\": {\n        \"connection\": {\n          \"id\": \"{{azure_service_connection_id}}\",\n          \"name\": \"Azure DevOps Service Principal\"\n        },\n        \"defaultVersionType\": {\n          \"id\": \"latestType\",\n          \"name\": \"Latest\"\n        },\n        \"definition\": {\n          \"id\": \"{{docker_repository}}\",\n          \"name\": \"{{docker_repository}}\"\n        },\n        \"registryurl\": {\n          \"id\": \"{{docker_name_space}}\",\n          \"name\": \"{{docker_registry}}\"\n        },\n        \"resourcegroup\": {\n          \"id\": \"{{docker_resource_group}}\",\n          \"name\": \"{{docker_resource_group}}\"\n        }\n      },\n      \"isPrimary\": true,\n      \"isRetained\": false\n    }\n  ],\n  \"triggers\": [\n    {\n      \"alias\": \"_{{collection}}_{{service_name}}\",\n      \"triggerType\": 4\n    }\n  ],\n  \"releaseNameFormat\": \"Release-$(rev:r)\",\n  \"tags\": [],\n  \"properties\": {\n    \"DefinitionCreationSource\": {\n      \"$type\": \"System.String\",\n      \"$value\": \"ReleaseClone\"\n    },\n    \"IntegrateJiraWorkItems\": {\n      \"$type\": \"System.String\",\n      \"$value\": \"false\"\n    }\n  },\n  \"name\": \"{{service_name}} - release\",\n  \"path\": \"\\\\Development\"\n}"
+				},
+				"url": {
+					"raw": "https://vsrm.dev.azure.com/{{collection}}/{{project}}/_apis/release/definitions?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"vsrm",
+						"dev",
+						"azure",
+						"com"
+					],
+					"path": [
+						"{{collection}}",
+						"{{project}}",
+						"_apis",
+						"release",
+						"definitions"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "delete deveopment release pipeline",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Content-Type",
+						"type": "text",
+						"value": "application/json",
+						"disabled": true
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"url": {
+					"raw": "https://vsrm.dev.azure.com/{{collection}}/{{project}}/_apis/release/definitions/{{release_pipeline_id}}?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"vsrm",
+						"dev",
+						"azure",
+						"com"
+					],
+					"path": [
+						"{{collection}}",
+						"{{project}}",
+						"_apis",
+						"release",
+						"definitions",
+						"{{release_pipeline_id}}"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "delete build pipeline",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Content-Type",
+						"type": "text",
+						"value": "application/json"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"url": {
+					"raw": "https://dev.azure.com/{{collection}}/{{project}}/_apis/build/definitions/{{build_pipeline_id}}?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"azure",
+						"com"
+					],
+					"path": [
+						"{{collection}}",
+						"{{project}}",
+						"_apis",
+						"build",
+						"definitions",
+						"{{build_pipeline_id}}"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		},
+		{
+			"name": "delete repo",
+			"event": [
+				{
+					"listen": "test",
+					"script": {
+						"exec": [
+							""
+						],
+						"type": "text/javascript"
+					}
+				},
+				{
+					"listen": "prerequest",
+					"script": {
+						"exec": [
+							"pm.globals.set(\"service_name\", \"test-repo\");",
+							"pm.globals.set(\"docker_image_name\", \"testrepo\");"
+						],
+						"type": "text/javascript"
+					}
+				}
+			],
+			"request": {
+				"auth": {
+					"type": "basic",
+					"basic": [
+						{
+							"key": "password",
+							"value": "{{password}}",
+							"type": "string"
+						},
+						{
+							"key": "username",
+							"value": "{{username}}",
+							"type": "string"
+						}
+					]
+				},
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": ""
+				},
+				"url": {
+					"raw": "https://dev.azure.com/{{collection}}/{{project}}/_apis/git/repositories/{{repo_id}}?api-version=5.0",
+					"protocol": "https",
+					"host": [
+						"dev",
+						"azure",
+						"com"
+					],
+					"path": [
+						"{{collection}}",
+						"{{project}}",
+						"_apis",
+						"git",
+						"repositories",
+						"{{repo_id}}"
+					],
+					"query": [
+						{
+							"key": "api-version",
+							"value": "5.0"
+						}
+					]
+				}
+			},
+			"response": []
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	]
+}
